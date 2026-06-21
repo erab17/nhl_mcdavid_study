@@ -1,0 +1,37 @@
+Loading MoneyPuck shots 2015-2023 ...
+  shots: 999,863  | seasons: [2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023]
+  walk-forward test seasons (train on < N): [2016, 2017, 2018, 2019, 2020, 2021, 2022]
+Walk-forward training (train on seasons < N, score season N) ...
+  season 2016: trained on 108,746 shots (< 2016), scored 110,388 shots
+  season 2017: trained on 219,134 shots (< 2017), scored 119,056 shots
+  season 2018: trained on 338,190 shots (< 2018), scored 116,900 shots
+  season 2019: trained on 455,090 shots (< 2019), scored 103,401 shots
+  season 2020: trained on 558,491 shots (< 2020), scored 78,053 shots
+  season 2021: trained on 636,544 shots (< 2021), scored 120,610 shots
+  season 2022: trained on 757,154 shots (< 2022), scored 121,111 shots
+  cached walk-forward xG -> /Users/jerkeraberg/Claude/Projects/nhl_mcdavid_study/data/scored_shots_walkforward.parquet
+
+Player-season pairs (N -> N+1, >=100 shots in N): 2,504
+
+=== Q1. Predicting next-season goals (pooled, out-of-sample) ===
+          predictor    n  pearson_r  spearman_r     r2   rmse
+  prior goals (G_N) 2504     0.6865      0.6915 0.4712 6.5988
+      our xG (xG_N) 2504     0.7084      0.7271 0.5018 6.4049
+MoneyPuck xG (xG_N) 2504     0.6965      0.7160 0.4851 6.5118
+
+=== Q2. Finishing (G-xG per shot) repeatability, N -> N+1 (>=100 shots both seasons, n=2088) ===
+    xg_model  n_pairs  finishing_r  finishing_spearman
+      our xG     2088       0.2068              0.2128
+MoneyPuck xG     2088       0.2486              0.2514
+
+=== McDavid finishing by season (our xG, +goals per 100 shots / league pctile) ===
+ season  shots  goals    xg  fin_per100  league_pctile
+   2016    323     26 28.91       -0.90          31.24
+   2017    354     39 34.31        1.33          73.51
+   2018    323     39 30.09        2.76          89.54
+   2019    262     34 25.84        3.12          91.78
+   2020    254     31 24.06        2.73          89.29
+   2021    386     37 38.82       -0.47          39.66
+   2022    434     59 43.97        3.46          93.85
+
+Figures + CSVs written to /Users/jerkeraberg/Claude/Projects/nhl_mcdavid_study/figures
