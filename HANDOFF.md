@@ -247,6 +247,9 @@ How to run: `pip install -r requirements.txt`; download MoneyPuck shot CSVs into
 
 ## 5. Ranked next steps (for whoever picks this up)
 
+> **The living, concrete roadmap is now `NEXT_STEPS.md`** (updated after steps 1–3). The list
+> below is the original ranking with status struck through; read `NEXT_STEPS.md` for first actions.
+
 1. ~~**Predictive-validity harness.**~~ **DONE — see §4b.**
 2. ~~**Hierarchical shooter + goalie effects.**~~ **DONE — see §4b.**
 3. ~~**Full possession-chain model.**~~ **DONE — NEGATIVE RESULT, see §4b/§3.8.** Last-4 ≈
