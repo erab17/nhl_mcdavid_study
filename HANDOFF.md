@@ -145,6 +145,12 @@ Expected-Goals (xG) model from the old NHL API and studied Connor McDavid. That 
    tracking as commercial or small research datasets (Big Data Cup).
 7. **Reproducibility:** large data is gitignored; `run_pipeline.py` caches to parquet;
    `nhl_api.py` caches JSON. Re-running is cheap except the one ~2-min training pass.
+8. **Possession DEPTH doesn't transfer from soccer to hockey shot xG** (step 3, §4b). Last-4
+   events ≈ last-1 (AUC +0.0016 from scratch, 0.0 over MoneyPuck). Hockey possessions are
+   short/chaotic; the immediately-preceding event holds the signal. Corollary trap: layering a
+   second xG model on MoneyPuck's xGoal lifts AUC 0.79→0.81 purely by **ensembling** — do NOT
+   sell that as a feature win. The honest test of any added-context idea is *last-N vs last-1*
+   on identical data, not *new-model vs MoneyPuck*.
 
 ---
 
@@ -163,9 +169,10 @@ src/run_pipeline.py                     train (GroupKFold OOF) -> metrics, figur
 src/predictive_validity.py              STEP 1: walk-forward next-season-goal forecast harness
 src/shooter_goalie_effects.py           STEP 2: empirical-Bayes shooter+goalie effects on base xG
 src/possession.py                       N-events-back possession chains from raw PBP
+src/possession_model.py                 STEP 3: full-season last-1 vs last-4 chain xG (+ MoneyPuck layer)
 src/tracking_xg.py                      tracking-xG prototype on Big Data Cup (+leakage notes)
-figures/                               reliability, importance, McDavid career, predictive_validity*, shooter_goalie*
-data/  (gitignored)                     moneypuck/ (shots 2015-23), bigdatacup/, raw/, scored_shots*.parquet
+figures/                               reliability, importance, McDavid career, predictive_validity*, shooter_goalie*, possession_chain*
+data/                                  moneypuck/ raw/*.json (gitignored); scored_shots*/possession_shots* parquet caches + run logs tracked
 ```
 
 How to run: `pip install -r requirements.txt`; download MoneyPuck shot CSVs into
@@ -212,24 +219,49 @@ How to run: `pip install -r requirements.txt`; download MoneyPuck shot CSVs into
   - Outputs: `figures/shooter_goalie_shotlevel.csv`, `shooter_goalie_predval.csv`,
     `shooter_effect_ranking.csv`, `goalie_effect_ranking.csv`, `shooter_goalie_effects.png`.
 
+- **Step 3 — full possession-chain model — DONE (NEGATIVE RESULT)**
+  (`src/possession_model.py`, 2026-06-21). The soccer "N events back" idea, tested at scale:
+  scraped the **full 2023-24 league season** (1312 games) of raw PBP via the new
+  `nhl_api.league_game_ids` (league-wide game list from `api.nhle.com/stats/rest/en/game`;
+  the old `season_game_ids` only returned EDM's 82), built last-4 possession chains for all
+  **115,446 shots**, and compared nested feature sets with GroupKFold(game) OOF.
+  - *Part A (identical data):* core geometry AUC 0.729 → +last-1 event 0.763 → +last-4 chain
+    **0.765**. Going from 1 event back to 4 adds **+0.0016 AUC / −0.0003 logloss — negligible.**
+  - *Part B (layered on MoneyPuck's production xGoal as a fixed `init_score` offset, 99% of
+    shots merged via gamePk = season·1e6 + MP game_id):* xGoal 0.790 → +last-1 **0.8131** →
+    +last-4 **0.8130**. last-4 = last-1 to 4 decimals.
+  - **The Part-B jump to 0.81 is an ENSEMBLE artifact, NOT possession depth** — and I almost
+    misread it. It tripped the project's "AUC > 0.80 = suspect" rule, so I ablated: no single
+    chain feature causes it, geometry-only-on-xGoal does *not* inflate (0.782), and crucially
+    **last-1 already reaches 0.8131** — the lift is just stacking xGoal with a partly-
+    independent from-scratch geom+last-event model. Depth (events 2-4 back) contributes ~0.
+  - **Takeaway (new learning, see §3.8):** the soccer build-up-chain idea does **not** transfer
+    to hockey shot xG. The single preceding event (rebound / rush / turnover) carries all the
+    recoverable pre-shot sequence signal; by the time the shot is taken, events 2-4 back are
+    noise. This kills next-step #4 (sequence model) as a *shot-xG* play — pivot it to a
+    different target (zone entries, chance creation) if pursued.
+  - Outputs: `figures/possession_chain_metrics.csv`, `possession_chain.png`. Cache:
+    `data/possession_shots_2023.parquet` (raw PBP JSON in `data/raw/` is gitignored).
+
 ---
 
 ## 5. Ranked next steps (for whoever picks this up)
 
 1. ~~**Predictive-validity harness.**~~ **DONE — see §4b.**
 2. ~~**Hierarchical shooter + goalie effects.**~~ **DONE — see §4b.**
-3. **Full possession-chain model** *(medium).* Scrape a full league season of raw PBP via
-   `nhl_api.py`, build `possession.chain_features` for every shot, and test last-4 vs
-   last-1 (MoneyPuck-style) on identical data + as an additive layer on `xGoal`.
-4. **Sequence model** *(medium-high).* GRU/Transformer over the possession event stream
-   instead of hand-crafted chain features — likely where genuinely new shot-level gains are.
-5. **Tracking features at scale** *(high, needs data access).* The Big Data Cup prototype
-   shows the signal (+0.05 AUC). Productionizing needs Sportlogiq/Stathletes or whatever
-   NHL EDGE eventually exposes per-shot. Pre-shot pass velocity, defender distance,
-   screens, shooting-in-stride are the ceiling-raisers.
+3. ~~**Full possession-chain model.**~~ **DONE — NEGATIVE RESULT, see §4b/§3.8.** Last-4 ≈
+   last-1; possession depth adds nothing to hockey shot xG.
+4. **Sequence model** *(medium-high)* — **deprioritised by step 3.** A GRU/Transformer over the
+   event stream chases the same depth signal step 3 just showed is ~absent *for shot xG*. Only
+   worth it against a **different target** (zone-entry value, chance creation, next-shot timing).
+5. **Tracking features at scale** *(high, needs data access)* — **now the most promising lead.**
+   Step 3 confirms event-stream *sequence* is tapped out; the remaining headroom is spatial
+   (defender distance, screens, shooting-in-stride), which needs tracking. Big Data Cup
+   prototype showed +0.05 AUC. Productionizing needs Sportlogiq/Stathletes or per-shot NHL EDGE.
 6. **Modeling polish** *(low, fractional).* Optuna tuning, monotonic constraints on
    distance/angle, isotonic recalibration, multi-task (goal/rebound/SOG jointly).
 
-**Steps 1 & 2 are done** (§4b) — we now beat MoneyPuck *on the metric that matters*
-(predictive validity) both with the walk-forward base xG and, more so, with the shooter-
-adjusted xG. **Next up is #3 (possession chains),** then the harder sequence/tracking work.
+**Steps 1, 2 & 3 are done** (§4b). 1 & 2 win on predictive validity (walk-forward base xG, and
+more so the shooter-adjusted xG); 3 is a clean negative (possession depth doesn't help shot xG).
+**Best remaining lead is #5 (spatial/tracking features)** — sequence depth is exhausted, so new
+shot-level signal has to come from *where the other players are*, which is gated on data access.

@@ -52,6 +52,18 @@ def season_game_ids(season: int, game_type: int = 2) -> list[int]:
     return sorted({g["id"] for g in sched["games"] if g["gameType"] == game_type})
 
 
+def league_game_ids(season: int, game_type: int = 2) -> list[int]:
+    """ALL gamePks league-wide for a season (every team, not just EDM).
+
+    Uses the stats API game list (api.nhle.com), which returns the whole season
+    in one cached call. game_type 2=regular, 3=playoffs. season=2023 -> 2023-24.
+    """
+    data = _get_json(
+        f"{STATS}/game?cayenneExp=season={season}{season+1}",
+        cache_key=f"games_{season}")
+    return sorted({g["id"] for g in data["data"] if g.get("gameType") == game_type})
+
+
 def play_by_play(game_id: int) -> pd.DataFrame:
     """Return shot-level rows for one game from the new play-by-play endpoint."""
     data = _get_json(f"{WEB}/gamecenter/{game_id}/play-by-play", cache_key=f"pbp_{game_id}")

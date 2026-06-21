@@ -1,0 +1,35 @@
+Loading cached chain table -> /Users/jerkeraberg/Claude/Projects/nhl_mcdavid_study/data/possession_shots_2023.parquet
+
+Shots: 115,446 | goal rate 0.0716 | games 1312
+  OOF: core (geometry+type)  (6 feats)
+  OOF: + last-1 event (MoneyPuck-style)  (12 feats)
+  OOF: + last-4 chain (possession)  (32 feats)
+
+=== Part A: nested models on identical raw-PBP shots (GroupKFold OOF) ===
+                           model      n  log_loss   brier     auc
+            baseline (mean rate) 115446   0.25780 0.06649 0.50000
+            core (geometry+type) 115446   0.23668 0.06338 0.72906
++ last-1 event (MoneyPuck-style) 115446   0.22680 0.06140 0.76306
+     + last-4 chain (possession) 115446   0.22654 0.06151 0.76467
+
+Merged to MoneyPuck: 114,662 shots (99% of PBP shots matched)
+
+=== Part B: nested layers on MoneyPuck's production xGoal (offset) ===
+                model      n  log_loss   brier     auc
+MoneyPuck xGoal alone 114662   0.21515 0.05840 0.79036
+  + last-1 over xGoal 114662   0.20549 0.05581 0.81312
+  + last-4 over xGoal 114662   0.20542 0.05584 0.81302
+
+========================================================================
+CONCLUSION -- does looking >1 event back help? (the step-3 question)
+  Part A  last-4 vs last-1 on identical data : AUC +0.0016  (negligible)
+  Part B  last-4 vs last-1 over MP xGoal      : AUC -0.0001  (negligible)
+  NOTE: the lift from xGoal-alone to +last-1 is an ENSEMBLE effect
+        (stacking two partly-independent xG models), available from a
+        SINGLE event back -- NOT evidence for possession depth.
+  => Soccer-style 'N events back' does NOT transfer to hockey shot xG:
+     the one preceding event (rebound/rush/turnover) carries the signal;
+     events 2-4 back are noise by the time the shot is taken.
+========================================================================
+
+Figures + CSV written to /Users/jerkeraberg/Claude/Projects/nhl_mcdavid_study/figures
