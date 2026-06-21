@@ -1,0 +1,7 @@
+# Large downloaded / generated data (regenerate via the scripts)
+data/moneypuck/*.zip
+data/moneypuck/*.csv
+data/raw/*.json
+data/scored_shots.parquet
+__pycache__/
+.ipynb_checkpoints/

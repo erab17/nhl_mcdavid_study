@@ -1,0 +1,12 @@
+numpy
+pandas
+pyarrow
+scikit-learn
+lightgbm
+matplotlib
+seaborn
+requests
+tqdm
+nbformat
+nbconvert
+ipykernel
