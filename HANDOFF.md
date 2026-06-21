@@ -160,10 +160,12 @@ notebooks/NHL_McDavid_xG_modern.ipynb   the executed write-up (metrics, figures,
 src/nhl_api.py                          CURRENT NHL API client (cached) — replaces dead scraper
 src/modern_xg.py                        MoneyPuck loading + feature engineering + LEAK_COLS
 src/run_pipeline.py                     train (GroupKFold OOF) -> metrics, figures, parquet
+src/predictive_validity.py              STEP 1: walk-forward next-season-goal forecast harness
+src/shooter_goalie_effects.py           STEP 2: empirical-Bayes shooter+goalie effects on base xG
 src/possession.py                       N-events-back possession chains from raw PBP
 src/tracking_xg.py                      tracking-xG prototype on Big Data Cup (+leakage notes)
-figures/                               reliability, importance, McDavid career, metrics.csv
-data/  (gitignored)                     moneypuck/ (shots 2015-23), bigdatacup/, raw/, scored_shots.parquet
+figures/                               reliability, importance, McDavid career, predictive_validity*, shooter_goalie*
+data/  (gitignored)                     moneypuck/ (shots 2015-23), bigdatacup/, raw/, scored_shots*.parquet
 ```
 
 How to run: `pip install -r requirements.txt`; download MoneyPuck shot CSVs into
@@ -171,15 +173,51 @@ How to run: `pip install -r requirements.txt`; download MoneyPuck shot CSVs into
 
 ---
 
+## 4b. Steps done since the original rebuild
+
+- **Step 1 — predictive-validity harness — DONE** (`src/predictive_validity.py`, 2026-06-21).
+  Walk-forward (train xG on seasons < N, score season N prospectively), aggregate to
+  player-season, forecast season N+1 goals. Our walk-forward xG forecasts next-season goals
+  **better than MoneyPuck and better than prior goals** — that's the honest "beat." Caches
+  prospective per-shot xG to `data/scored_shots_walkforward.parquet` (gitignored). See memory
+  for exact numbers.
+
+- **Step 2 — hierarchical shooter + goalie empirical-Bayes effects — DONE**
+  (`src/shooter_goalie_effects.py`, 2026-06-21). A logistic random-intercept layered on the
+  base xG as a fixed offset: `logit(p_adj) = logit(xg_base) + u_shooter + v_goalie`, with
+  `u~N(0,τ_u²)`, `v~N(0,τ_v²)` fit by an EM/empirical-Bayes scheme (penalised-MAP Newton for
+  the offsets, EM for the variance components). Per-entity shrinkage falls out automatically;
+  an unseen shooter gets exactly 0. **Leak-free / walk-forward:** `u,v` for season N are
+  estimated ONLY from seasons < N (those with a walk-forward base xG, 2016..N-1), reusing the
+  step-1 cache as the base xG (NOT the all-seasons OOF, which would leak future seasons into a
+  "season<N" prior). Results:
+  - *Shot-level* (n=659k, test seasons 2017-22): base logloss **0.21353 → 0.21329** (+shooter)
+    → **0.21326** (+goalie). Real but tiny, exactly as expected (xG saturates; finishing is a
+    season-aggregate effect, not a single-shot one). AUC 0.7669→0.7679 — well under the ~0.80
+    "you're leaking" line. MoneyPuck still wins shot-level (0.2034) — fine, it's a richer
+    shot-quality model; that's not what the shooter layer is for.
+  - *Predictive validity* (the metric that matters, n=2080 player-season pairs): shooter-
+    adjusted xG forecasts next-season goals **best of all**: Pearson r **0.706** vs base xG
+    0.692, prior goals 0.690, MoneyPuck 0.680; R² 0.499 vs 0.479; RMSE 6.80 vs 6.93.
+  - *McDavid:* shooter offset **u=+0.194 log-odds (+1.27 goals/100 shots vs base xG)**, rank
+    **43 / 543** shooters (≥500 shots), **92nd league percentile** — corroborates step 1's
+    top-decile finisher result via a totally different method. Draisaitl is #2 overall (nice
+    Edmonton sanity check). `τ_u=0.163 > τ_v=0.072`: shooter finishing spread >> goalie spread.
+    Goalie leaderboard (best suppression): Shesterkin, Sorokin, Saros, Vasilevskiy, Hellebuyck
+    — exactly the league's elite, a strong face-validity check.
+  - **INTERPRETATION (important):** the shooter-adjusted xG is **no longer a pure chance-quality
+    metric** — it folds the shooter's finishing skill INTO the expectation. Keep **base xG for
+    finishing studies** (G − xG), use the **adjusted xG for goal projection**. Don't compute
+    "finishing above adjusted xG" — finishing is already baked in.
+  - Outputs: `figures/shooter_goalie_shotlevel.csv`, `shooter_goalie_predval.csv`,
+    `shooter_effect_ranking.csv`, `goalie_effect_ranking.csv`, `shooter_goalie_effects.png`.
+
+---
+
 ## 5. Ranked next steps (for whoever picks this up)
 
-1. **Predictive-validity harness** *(highest value, low effort).* Train xG on seasons ≤N,
-   test how well each model's player-season xG predicts season N+1 actual goals
-   (out-of-sample RMSE/R²). This is the honest way to "beat" MoneyPuck and to prove the
-   McDavid finishing signal is repeatable. Data is already on disk.
-2. **Hierarchical shooter + goalie effects** *(low effort, demonstrated to help).*
-   Empirical-Bayes / mixed-model shrinkage layered on the base xG. Improves player
-   evaluation; small but free shot-level gain. Be explicit it changes the interpretation.
+1. ~~**Predictive-validity harness.**~~ **DONE — see §4b.**
+2. ~~**Hierarchical shooter + goalie effects.**~~ **DONE — see §4b.**
 3. **Full possession-chain model** *(medium).* Scrape a full league season of raw PBP via
    `nhl_api.py`, build `possession.chain_features` for every shot, and test last-4 vs
    last-1 (MoneyPuck-style) on identical data + as an additive layer on `xGoal`.
@@ -192,6 +230,6 @@ How to run: `pip install -r requirements.txt`; download MoneyPuck shot CSVs into
 6. **Modeling polish** *(low, fractional).* Optuna tuning, monotonic constraints on
    distance/angle, isotonic recalibration, multi-task (goal/rebound/SOG jointly).
 
-**Recommended order: 1 → 2 → 3.** That's the defensible, data-on-hand path to a model
-that genuinely beats MoneyPuck *on the metric that matters* (predictive validity), before
-investing in the harder sequence/tracking work.
+**Steps 1 & 2 are done** (§4b) — we now beat MoneyPuck *on the metric that matters*
+(predictive validity) both with the walk-forward base xG and, more so, with the shooter-
+adjusted xG. **Next up is #3 (possession chains),** then the harder sequence/tracking work.
