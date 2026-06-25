@@ -182,19 +182,145 @@ md(r"""
 * Both our model and MoneyPuck's agree closely on his per-season xG, which gives
   confidence the finishing gap is a property of *him*, not an artifact of one model.
 
-* Both our model and MoneyPuck's agree closely on his per-season xG, which gives
-  confidence the finishing gap is a property of *him*, not an artifact of one model.
+The headline is a single eye-catching season (+15 in 2022-23). A skeptic should ask: is
+this **real, repeatable skill**, or a lucky tail? The rest of the notebook answers that by
+attacking the question from three independent angles. All three were run **leak-free**
+(walk-forward: a season's predictions never see that season or any later one).
 """)
 
 md(r"""
-## 4. Future directions — how would you *beat* MoneyPuck?
+## 4. Is the finishing result real? Triangulating it three ways
 
-We landed within ~0.02 AUC of MoneyPuck's production model. The natural question:
-what would it take to pass them? The work below maps the terrain (full detail and
-runnable code in `src/` and in `HANDOFF.md`).
+A finishing edge that shows up under *one* method could be an artifact of that method. So
+we test it three different ways, each with its own failure modes:
 
-### 4a. Why we got so close with ~25 features (xG saturates)
-A feature ablation tells the story — each added feature buys less than the last:
+1. **Predictive validity** — does our xG forecast *next* season's goals better than rivals?
+2. **A hierarchical shooter effect** — fit each shooter's finishing as a shrunk random
+   effect; where does McDavid rank league-wide?
+3. **Possession chains** — a negative control: does more pre-shot context move xG at all,
+   or is the shot-quality model already saturated?
+
+> These ran in `src/predictive_validity.py`, `src/shooter_goalie_effects.py`, and
+> `src/possession_model.py`. They're heavy (full-league walk-forward), so here we load
+> the committed result tables from `figures/` rather than recompute. See `HANDOFF.md` /
+> `NEXT_STEPS.md` for the full method notes.
+""")
+
+md(r"""
+### 4a. Predictive validity — *the* metric that matters
+
+Lowest in-sample log loss ≠ best metric. A finishing stat earns its keep if it predicts
+the **future**. The harness trains xG on seasons `< N`, scores season `N` prospectively,
+aggregates to player-season, and asks how well each metric in season `N` predicts a
+player's **goals in season `N+1`** (n = 2,504 player-seasons, ≥100 shots).
+""")
+
+code(r"""
+pv = pd.read_csv("../figures/predictive_validity_models.csv")
+pv.columns = ["predictor","n","pearson_r","spearman_r","r2","rmse"]
+pv.round(3)
+""")
+
+md(r"""
+**Our xG wins.** It forecasts next-season goals better (Pearson r **0.708**, R² 0.502)
+than both MoneyPuck's xG (0.696) *and* a player's own prior goals (0.686) — the benchmark
+every projection model has to beat. On the test that actually matters for projection, the
+context-aware model edges the ~100-feature production model.
+
+And finishing skill itself (goals above expected, per shot) **is repeatable** year over
+year — modest but real (r ≈ 0.21 ours / 0.25 MoneyPuck), exactly the signature of a true
+tail effect rather than noise.
+""")
+
+code(r"""
+fin = pd.read_csv("../figures/predictive_validity_finishing.csv")
+fin.round(3)
+""")
+
+md(r"""
+### 4b. A hierarchical shooter effect — where does McDavid rank?
+
+MoneyPuck's xG is **shooter-blind by design** (that's what makes G−xG a finishing stat).
+We add a shrunk shooter (and goalie) finishing prior on top of the base xG as a fixed
+offset — `logit(p_adj) = logit(xg_base) + u_shooter + v_goalie` — fit by empirical Bayes,
+so low-volume shooters are pulled toward zero automatically. Estimated **walk-forward**
+(season N's effects use only seasons `< N`).
+
+Per shot the lift is real but **tiny** — finishing is a season-aggregate effect, not a
+shot-level one:
+""")
+
+code(r"""
+sl = pd.read_csv("../figures/shooter_goalie_shotlevel.csv")
+sl.round(4)
+""")
+
+md(r"""
+But the **shooter-adjusted xG forecasts next-season goals best of all** — better than the
+base xG, prior goals, and MoneyPuck — closing the loop with section 4a:
+""")
+
+code(r"""
+sgpv = pd.read_csv("../figures/shooter_goalie_predval.csv")
+sgpv.round(3)
+""")
+
+md("And the league-wide finishing leaderboard — McDavid's rank is the headline:")
+
+code(r"""
+rk = pd.read_csv("../figures/shooter_effect_ranking.csv")
+n_shooters = len(rk)
+top = rk.nsmallest(5, "rank")[["rank","name","shots","goals","u","goals_per100_vs_base","pctile"]]
+mcd_row = rk[rk["name"]=="Connor McDavid"][["rank","name","shots","goals","u","goals_per100_vs_base","pctile"]]
+print(f"qualified shooters: {n_shooters}")
+pd.concat([top, mcd_row]).round(3)
+""")
+
+md(r"""
+**A second, fully independent confirmation.** By a completely different method than the
+career G−xG plot, McDavid lands at **rank 43 of 543 qualified shooters — 92nd percentile**,
+finishing **+1.27 goals per 100 shots** above what his chances were worth (effect
+u = +0.19 log-odds). Linemate **Leon Draisaitl ranks 2nd** — a nice Edmonton sanity check —
+and the goalie leaderboard (Shesterkin, Sorokin, Saros, Vasilevskiy, Hellebuyck) is
+entirely face-valid. Shooter spread dominates goalie spread (τ_u 0.163 ≫ τ_v 0.072):
+finishing talent varies more than goalie shot-suppression.
+
+> **Caveat baked in:** shooter-adjusted xG is no longer a *pure* chance-quality metric (it
+> folds finishing into the expectation). Keep **base xG** for measuring finishing (G−xG);
+> use **adjusted xG** for projection.
+""")
+
+md(r"""
+### 4c. Possession chains — a negative result worth keeping
+
+The natural next idea: borrow soccer's "N ball-events back" build-up and feed the full
+possession into xG. We scraped a full league season (1,312 games, 115k shots) of raw
+play-by-play and built last-4-event chains. **It doesn't help.**
+""")
+
+code(r"""
+pc = pd.read_csv("../figures/possession_chain_metrics.csv")
+pc[["model","auc","log_loss","analysis"]].round(4)
+""")
+
+md(r"""
+On identical data, geometry-only xG (AUC 0.729) jumps to 0.763 by adding **one** event back
+(MoneyPuck-style), then to just 0.765 with **four** — i.e. events 2–4 back add ~nothing.
+Layered on MoneyPuck's xGoal the story is the same: last-4 ≈ last-1 (0.813 either way; the
+0.81 is an ensemble artifact, ablated and confirmed *not* a leak). The one preceding event
+(rebound / rush / turnover) holds the pre-shot signal; the rest of the possession is noise
+*for shot xG*.
+
+This is a useful negative: it says the event-stream sequence is **exhausted**, so any
+remaining shot-level headroom must come from somewhere genuinely new — namely **where the
+other players are** (defender distance, screens), which needs tracking data.
+""")
+
+md(r"""
+### 4d. Where the remaining headroom is — and isn't (xG saturates)
+
+Why did ~25 features land within ~0.02 AUC of MoneyPuck's ~100? Because xG **saturates** —
+each added feature buys less than the last:
 
 | feature set | #feat | AUC |
 |---|---|---|
@@ -206,56 +332,46 @@ A feature ablation tells the story — each added feature buys less than the las
 | MoneyPuck (~100 feat) | ~100 | 0.786 |
 
 **Distance alone captures ~71% of the entire headroom** from a coin-flip to MoneyPuck.
-xG is a low-ceiling, high-variance problem: whether a puck goes in is mostly irreducible
-noise. "Beating" them with *more of the same* features is hopeless — you need *new
-information*. (And note: we reuse MoneyPuck's own engineered features, and AUC flatters
-the gap — the log-loss difference, 0.210 vs 0.201, is the honest measure.)
+Whether a puck goes in is mostly irreducible noise; "beating" them with *more of the same*
+features is hopeless (and AUC flatters the gap — the honest measure is log loss, 0.210 vs
+0.201). New *information* is the only lever, which points at tracking.
 
-### 4b. The angles that could actually win
-1. **Reframe the scoreboard to predictive validity.** Lowest in-sample log loss ≠ best
-   model. The real test: does your xG predict *next season's* goals? Finishing-aware
-   models win there even when shot-level metrics are flat. *(Highest value, low effort.)*
-2. **Shooter + goalie effects.** MoneyPuck's xG is *shooter-blind by design* (that's what
-   makes G−xG a finishing stat). A shrunk shooter-finishing prior improves even
-   MoneyPuck's own model — real and orthogonal, but **tiny per shot** (finishing is a
-   season-aggregate effect). This is the McDavid result operationalized.
-3. **Possession chains** (`src/possession.py`) — the hockey analog of a soccer "N
-   ball-events back" build-up. MoneyPuck uses only *one* event back; the full possession
-   (turnovers, multi-pass cross-ice movement, sustained pressure) carries more.
-4. **Tracking data** — the ceiling-raiser (shot speed at release, defender distance,
-   screens, shooting in stride). This is the only category that adds genuinely *new*
-   information rather than re-modeling old.
-""")
-
-md(r"""
-### 4c. Tracking prototype + a leakage lesson worth keeping
-
-NHL EDGE (the league's puck/player tracking) does **not** expose per-shot data publicly —
-only season aggregates. As a stand-in we used the hand-tracked **Big Data Cup 2021**
-dataset (`src/tracking_xg.py`), which has pass origin/receiver coordinates and a
-one-timer flag.
-
-**A cautionary tale:** the first model scored **AUC 0.95** — a fantasy. The dataset is
-*assist-centric*, so `time_since_pass` (assist logged at the goal's clock second) and
-`off_pass` (143/145 goals had a logged preceding pass) both leaked the outcome. After
-removing them and restricting to a leak-free population (shots already off a pass), the
-honest result holds:
+**Tracking prototype + a leakage lesson.** NHL EDGE doesn't expose per-shot data publicly
+(season aggregates only), so as a stand-in we used the hand-tracked **Big Data Cup 2021**
+set (`src/tracking_xg.py`). The first model scored **AUC 0.95** — a fantasy: the data is
+*assist-centric*, so `time_since_pass` and `off_pass` leaked the outcome. After removing
+them and restricting to a leak-free population:
 
 | model (shots off a pass) | log loss | AUC |
 |---|---|---|
 | shot geometry only | 0.373 | 0.788 |
 | + pass trajectory | 0.336 | **0.838** |
 
-Pass trajectory (cross-ice distance, pre-shot angle change) adds **+0.05 AUC** — small
-sample, so directional, but it confirms tracking-era pre-shot-movement signal is real and
-is where the remaining edge lives.
+Pass trajectory adds **+0.05 AUC** (small sample, so directional) — confirming the
+tracking-era pre-shot-movement signal is real and is where the remaining edge lives.
 
-> **Rule of thumb:** any xG much above ~0.80 AUC is almost certainly leaking. Always
-> sanity-check feature/goal-rate tables before trusting a metric.
+> **Rule of thumb:** any xG much above ~0.80 AUC is almost certainly leaking. Sanity-check
+> feature/goal-rate tables before trusting a metric.
+""")
 
-**Recommended path:** predictive-validity harness → shooter/goalie effects → full
-possession-chain model → (later) sequence + tracking models. See `HANDOFF.md` for the
-ranked plan.
+md(r"""
+## 5. Conclusion
+
+Starting from one striking number — McDavid +15 goals over expected in 2022-23 — we asked
+whether it was real skill or a lucky tail, and answered it three independent ways:
+
+* **Predictive validity:** our context-aware xG forecasts next-season goals better than
+  both MoneyPuck and prior goals, and finishing skill is demonstrably repeatable.
+* **Hierarchical shooter effect:** by a wholly different method, McDavid ranks **43 / 543
+  (92nd pctile)** in finishing, +1.27 goals/100 shots — with Draisaitl #2 and a face-valid
+  goalie leaderboard as sanity checks.
+* **Possession chains:** a negative control showing the shot-quality model is saturated on
+  event-stream data, so the McDavid signal isn't an under-modeling artifact.
+
+**The finishing result is real and triangulated.** The honest "beat" over MoneyPuck is on
+*predictive validity*, not shot-level log loss — and the one remaining frontier for new
+shot-level signal is player/puck **tracking** (defender distance, screens, release), which
+isn't yet publicly available per shot.
 """)
 
 nb["cells"] = cells

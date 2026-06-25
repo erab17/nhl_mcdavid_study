@@ -34,16 +34,37 @@ both the **data** and the **modelling** have been brought up to date.
   seasons**, peaking at **~+15 goals above xG in 2022-23**. He is a genuinely elite
   *finisher* — a signal the 2020 model was structurally blind to.
 
+That finishing result is **triangulated three independent ways** (all leak-free,
+walk-forward):
+
+1. **Predictive validity** — our xG forecasts *next-season* goals better (Pearson r
+   **0.708**) than both MoneyPuck (0.696) and a player's own prior goals (0.686). The
+   honest "beat" over MoneyPuck is here, on the metric that matters for projection — not
+   on shot-level log loss.
+2. **Hierarchical shooter effect** — a shrunk empirical-Bayes finishing prior ranks
+   McDavid **43 / 543 qualified shooters (92nd pctile)**, +1.27 goals per 100 shots
+   above expected. Linemate Draisaitl ranks #2; the goalie leaderboard
+   (Shesterkin/Sorokin/Saros/…) is face-valid. The shooter-adjusted xG also forecasts
+   next-season goals best of all.
+3. **Possession chains** — a negative control: looking >1 event back adds ~nothing to
+   shot xG (last-4 ≈ last-1), so the McDavid signal isn't an under-modeling artifact. The
+   event-stream sequence is exhausted; the one remaining frontier is player/puck tracking.
+
 ## Layout
 
 ```
-src/nhl_api.py        cached client for the CURRENT NHL APIs (replaces the dead scraper)
-src/modern_xg.py      data loading + feature engineering for the xG model
-src/run_pipeline.py   train (GroupKFold OOF) -> metrics, figures, scored_shots.parquet
-build_notebook.py     generates the analysis notebook
+src/nhl_api.py               cached client for the CURRENT NHL APIs (replaces the dead scraper)
+src/modern_xg.py             data loading + feature engineering for the xG model
+src/run_pipeline.py          train (GroupKFold OOF) -> metrics, figures, scored_shots.parquet
+src/predictive_validity.py   walk-forward harness: does xG forecast next-season goals?
+src/shooter_goalie_effects.py  empirical-Bayes shooter/goalie finishing effects + rankings
+src/possession_model.py      last-N-event possession chains (negative result)
+src/tracking_xg.py           Big Data Cup tracking prototype + leakage lesson
+build_notebook.py            generates the analysis notebook
 notebooks/NHL_McDavid_xG_modern.ipynb   the write-up (run end-to-end)
-figures/              metrics, reliability curve, feature importance, McDavid career
+figures/              metrics, reliability, importance, McDavid career, step 1-3 tables
 NHL_McDavid.ipynb     the original 2020 notebook (kept for reference; no longer runs)
+NEXT_STEPS.md         ranked forward roadmap; HANDOFF.md has the full history
 ```
 
 ## Reproduce
@@ -57,9 +78,14 @@ pip install -r requirements.txt
 # 2. Train + score (~2 min) -> data/scored_shots.parquet + figures/
 python src/run_pipeline.py
 
-# 3. Build & run the notebook
+# 3. (optional) regenerate the triangulation tables in figures/
+python src/predictive_validity.py      # step 1
+python src/shooter_goalie_effects.py   # step 2
+python src/possession_model.py         # step 3 (scrapes a full season of PBP)
+
+# 4. Build & run the notebook (loads the figures/ tables above)
 python build_notebook.py
-jupyter nbconvert --to notebook --execute --inplace notebooks/NHL_McDavid_xG_modern.ipynb
+python -m nbconvert --to notebook --execute --inplace notebooks/NHL_McDavid_xG_modern.ipynb
 ```
 
 ## Data note (the true tracking frontier)
